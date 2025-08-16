@@ -10,15 +10,20 @@ import 'package:maternal_app/pages/health_worker_screen/infantEnrollment.dart';
 import 'package:maternal_app/pages/health_worker_screen/infantVisit_screen.dart';
 import 'package:maternal_app/pages/health_worker_screen/antenatal_screen.dart';
 import 'package:maternal_app/pages/health_worker_screen/dashboard_screen.dart';
+import 'package:maternal_app/models/patient.dart';
+import 'package:maternal_app/services/patient_service.dart';
+import 'package:flutter/foundation.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'dart:async';
 
 class EnrollmentFormScreen extends StatefulWidget {
-  const EnrollmentFormScreen({super.key});
+  const EnrollmentFormScreen({Key? key}) : super(key: key);
 
   @override
-  State<EnrollmentFormScreen> createState() => _EnrollmentFormScreenState();
+  State createState() => _EnrollmentFormScreenState();
 }
 
-class _EnrollmentFormScreenState extends State<EnrollmentFormScreen> {
+class _EnrollmentFormScreenState extends State with TickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _fNameController = TextEditingController();
   final _lNameController = TextEditingController();
@@ -31,6 +36,7 @@ class _EnrollmentFormScreenState extends State<EnrollmentFormScreen> {
   final _longitudeController = TextEditingController();
   DateTime? _selectedDate;
   int _selectedIndex = 1; // Assuming Enrollment is index 1 based on bottom nav
+
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
@@ -74,7 +80,7 @@ class _EnrollmentFormScreenState extends State<EnrollmentFormScreen> {
     super.dispose();
   }
 
-  Future<void> _getCurrentLocation() async {
+  Future _getCurrentLocation() async {
     bool serviceEnabled;
     LocationPermission permission;
     serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -125,9 +131,10 @@ class _EnrollmentFormScreenState extends State<EnrollmentFormScreen> {
   }
 
   void _showPreviewDialog() {
+    final outerContext = context; // Capture the outer context
     showDialog(
-      context: context,
-      builder: (BuildContext context) {
+      context: outerContext,
+      builder: (BuildContext dialogContext) {
         return Dialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
@@ -202,7 +209,7 @@ class _EnrollmentFormScreenState extends State<EnrollmentFormScreen> {
                     children: [
                       TextButton(
                         onPressed: () {
-                          Navigator.of(context).pop();
+                          Navigator.of(dialogContext).pop();
                         },
                         child: Text(
                           'Back',
@@ -214,24 +221,127 @@ class _EnrollmentFormScreenState extends State<EnrollmentFormScreen> {
                       ),
                       const SizedBox(width: 16),
                       ElevatedButton(
-                        onPressed: () {
-                          Navigator.of(context).pop();
-                          // Actual submit logic here (e.g., API call, save data, etc.)
-                          // For now, placeholder: show success message
-                          if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Enrollment Submitted!'),
-                            ),
+                        onPressed: () async {
+                          Navigator.of(dialogContext).pop();
+                          // Show loader
+                          showDialog(
+                            context: outerContext,
+                            barrierDismissible: false,
+                            builder: (BuildContext context) {
+                              return const Center(
+                                child: CircularProgressIndicator(),
+                              );
+                            },
                           );
-                          // Navigate to PregnancyFormScreen
-                          if (!mounted) return;
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => PregnancyFormScreen(),
-                            ),
+                          // Create Patient object from form data
+                          Patient newPatient = Patient(
+                            patientId: '', // Backend will generate
+                            nationalID: _nationalIDController.text.isEmpty
+                                ? null
+                                : _nationalIDController.text,
+                            fName: _fNameController.text.isEmpty
+                                ? null
+                                : _fNameController.text,
+                            lName: _lNameController.text.isEmpty
+                                ? null
+                                : _lNameController.text,
+                            dateOfBirth: _selectedDate != null
+                                ? DateFormat(
+                                    'yyyy-MM-dd',
+                                  ).format(_selectedDate!)
+                                : null,
+                            phoneNumber: _phoneNumberController.text.isEmpty
+                                ? null
+                                : _phoneNumberController.text,
+                            address: _addressController.text.isEmpty
+                                ? null
+                                : _addressController.text,
+                            district: _districtController.text.isEmpty
+                                ? null
+                                : _districtController.text,
+                            region: _regionController.text.isEmpty
+                                ? null
+                                : _regionController.text,
+                            latitude: _latitudeController.text.isEmpty
+                                ? null
+                                : _latitudeController.text,
+                            longitude: _longitudeController.text.isEmpty
+                                ? null
+                                : _longitudeController.text,
                           );
+                          try {
+                            Patient createdPatient = await PatientService()
+                                .createPatient(newPatient);
+                            if (!mounted) return;
+                            if (createdPatient.patientId == null ||
+                                createdPatient.patientId!.isEmpty) {
+                              throw Exception(
+                                'Patient creation succeeded but returned empty patientId',
+                              );
+                            }
+                            // Optional: Debug print to check the ID
+                            if (kDebugMode) {
+                              print(
+                                'Created Patient ID: ${createdPatient.patientId}',
+                              );
+                            }
+                            // Close loader
+                            Navigator.of(outerContext).pop();
+                            // Show success dialog (centered card)
+                            showDialog(
+                              context: outerContext,
+                              barrierDismissible: false,
+                              builder: (BuildContext context) {
+                                return AlertDialog(
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  content: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.check_circle,
+                                        color: Colors.green,
+                                        size: 60,
+                                      ),
+                                      const SizedBox(height: 16),
+                                      Text(
+                                        'Enrollment Submitted!',
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 18,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            );
+                            // Automatically close dialog after 2 seconds and navigate to PregnancyFormScreen
+                            await Future.delayed(const Duration(seconds: 2));
+                            if (!mounted) return;
+                            Navigator.of(
+                              outerContext,
+                            ).pop(); // Close success dialog
+                            Navigator.push(
+                              outerContext,
+                              MaterialPageRoute(
+                                builder: (context) => PregnancyFormScreen(
+                                  patientId: createdPatient.patientId!,
+                                ),
+                              ),
+                            );
+                          } catch (e) {
+                            if (!mounted) return;
+                            // Close loader
+                            Navigator.of(outerContext).pop();
+                            ScaffoldMessenger.of(outerContext).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Error submitting enrollment: $e',
+                                ),
+                              ),
+                            );
+                          }
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF3B82F6),
@@ -279,6 +389,422 @@ class _EnrollmentFormScreenState extends State<EnrollmentFormScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  void _resetForm() {
+    _formKey.currentState!.reset();
+    _fNameController.clear();
+    _lNameController.clear();
+    _phoneNumberController.clear();
+    _addressController.clear();
+    _districtController.clear();
+    _regionController.clear();
+    _nationalIDController.clear();
+    _latitudeController.clear();
+    _longitudeController.clear();
+    setState(() {
+      _selectedDate = null;
+    });
+  }
+
+  void _showSearchDialog() {
+    final outerContext = context;
+    final TextEditingController _searchNationalIDController =
+        TextEditingController();
+    final TextEditingController _searchPatientIDController =
+        TextEditingController();
+    showDialog(
+      context: outerContext,
+      builder: (BuildContext dialogContext) {
+        return DefaultTabController(
+          length: 2,
+          child: AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const TabBar(
+              tabs: [
+                Tab(text: 'National ID'),
+                Tab(text: 'Patient ID'),
+              ],
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: 200,
+              child: TabBarView(
+                children: [
+                  // National ID Tab
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextFormField(
+                        controller: _searchNationalIDController,
+                        decoration: InputDecoration(
+                          labelText: 'Enter National ID',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: () async {
+                          String nationalID = _searchNationalIDController.text;
+                          if (nationalID.isNotEmpty) {
+                            try {
+                              Patient patient = await PatientService()
+                                  .getByNationalID(nationalID);
+                              if (patient.patientId == null ||
+                                  patient.patientId!.isEmpty) {
+                                throw Exception(
+                                  'Patient fetch succeeded but returned empty patientId',
+                                );
+                              }
+                              if (kDebugMode) {
+                                print(
+                                  'Fetched Patient ID by National ID: ${patient.patientId}',
+                                );
+                              }
+                              Navigator.pop(
+                                outerContext,
+                              ); // Close search dialog
+                              // Show success dialog
+                              showDialog(
+                                context: outerContext,
+                                barrierDismissible: false,
+                                builder: (BuildContext context) {
+                                  return AlertDialog(
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    content: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(
+                                          Icons.check_circle,
+                                          color: Colors.green,
+                                          size: 60,
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Text(
+                                          'Patient Found!',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 18,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              );
+                              await Future.delayed(const Duration(seconds: 2));
+                              if (!mounted) return;
+                              Navigator.of(
+                                outerContext,
+                              ).pop(); // Close success dialog
+                              _showPatientDetailsDialog(patient);
+                            } catch (e) {
+                              ScaffoldMessenger.of(outerContext).showSnackBar(
+                                SnackBar(content: Text('Error: $e')),
+                              );
+                            }
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF3B82F6),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          'Search',
+                          style: GoogleFonts.poppins(color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                  // Patient ID Tab
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextFormField(
+                        controller: _searchPatientIDController,
+                        decoration: InputDecoration(
+                          labelText: 'Enter Patient ID',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: () async {
+                          String patientId = _searchPatientIDController.text;
+                          if (patientId.isNotEmpty) {
+                            try {
+                              Patient patient = await PatientService()
+                                  .getByPatientId(patientId);
+                              if (patient.patientId == null ||
+                                  patient.patientId!.isEmpty) {
+                                throw Exception(
+                                  'Patient fetch succeeded but returned empty patientId',
+                                );
+                              }
+                              if (kDebugMode) {
+                                print(
+                                  'Fetched Patient ID by Patient ID: ${patient.patientId}',
+                                );
+                              }
+                              Navigator.pop(
+                                outerContext,
+                              ); // Close search dialog
+                              // Show success dialog
+                              showDialog(
+                                context: outerContext,
+                                barrierDismissible: false,
+                                builder: (BuildContext context) {
+                                  return AlertDialog(
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    content: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(
+                                          Icons.check_circle,
+                                          color: Colors.green,
+                                          size: 60,
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Text(
+                                          'Patient Found!',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 18,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              );
+                              await Future.delayed(const Duration(seconds: 2));
+                              if (!mounted) return;
+                              Navigator.of(
+                                outerContext,
+                              ).pop(); // Close success dialog
+                              _showPatientDetailsDialog(patient);
+                            } catch (e) {
+                              ScaffoldMessenger.of(outerContext).showSnackBar(
+                                SnackBar(content: Text('Error: $e')),
+                              );
+                            }
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF3B82F6),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          'Search',
+                          style: GoogleFonts.poppins(color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showPatientDetailsDialog(Patient patient) {
+    final outerContext = context;
+    Completer<GoogleMapController> _mapController =
+        Completer<GoogleMapController>();
+    double? lat = double.tryParse(patient.latitude ?? '0.0') ?? 0.0;
+    double? lng = double.tryParse(patient.longitude ?? '0.0') ?? 0.0;
+    showDialog(
+      context: outerContext,
+      builder: (BuildContext dialogContext) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Patient Details',
+                    style: GoogleFonts.poppins(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF1F2937),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildPreviewItem(
+                            'Patient ID',
+                            patient.patientId ?? 'N/A',
+                          ),
+                          _buildPreviewItem(
+                            'National ID',
+                            patient.nationalID ?? 'N/A',
+                          ),
+                          _buildPreviewItem(
+                            'First Name',
+                            patient.fName ?? 'N/A',
+                          ),
+                          _buildPreviewItem(
+                            'Last Name',
+                            patient.lName ?? 'N/A',
+                          ),
+                          _buildPreviewItem(
+                            'Date of Birth',
+                            patient.dateOfBirth ?? 'N/A',
+                          ),
+                          _buildPreviewItem(
+                            'Phone Number',
+                            patient.phoneNumber ?? 'N/A',
+                          ),
+                          _buildPreviewItem(
+                            'Address',
+                            patient.address ?? 'N/A',
+                          ),
+                          _buildPreviewItem(
+                            'District',
+                            patient.district ?? 'N/A',
+                          ),
+                          _buildPreviewItem('Region', patient.region ?? 'N/A'),
+                          _buildPreviewItem(
+                            'Latitude',
+                            patient.latitude ?? 'N/A',
+                          ),
+                          _buildPreviewItem(
+                            'Longitude',
+                            patient.longitude ?? 'N/A',
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(dialogContext).pop();
+                        },
+                        child: Text(
+                          'Close',
+                          style: GoogleFonts.poppins(
+                            color: const Color(0xFF3B82F6),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      if (patient.latitude != null && patient.longitude != null)
+                        ElevatedButton(
+                          onPressed: () {
+                            showDialog(
+                              context: outerContext,
+                              builder: (BuildContext mapContext) {
+                                return Dialog(
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: SizedBox(
+                                    height: 300,
+                                    child: GoogleMap(
+                                      mapType: MapType.normal,
+                                      initialCameraPosition: CameraPosition(
+                                        target: LatLng(lat, lng),
+                                        zoom: 14.0,
+                                      ),
+                                      onMapCreated:
+                                          (GoogleMapController controller) {
+                                            _mapController.complete(controller);
+                                          },
+                                    ),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF3B82F6),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: Text(
+                            'Map',
+                            style: GoogleFonts.poppins(color: Colors.white),
+                          ),
+                        ),
+                      const SizedBox(width: 15),
+                      ElevatedButton(
+                        onPressed: () {
+                          if (patient.patientId == null ||
+                              patient.patientId!.isEmpty) {
+                            ScaffoldMessenger.of(outerContext).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Patient ID is empty. Cannot proceed.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+                          Navigator.of(dialogContext).pop();
+                          Navigator.push(
+                            outerContext,
+                            MaterialPageRoute(
+                              builder: (context) => PregnancyFormScreen(
+                                patientId: patient.patientId!,
+                              ),
+                            ),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF3B82F6),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          'Start',
+                          style: GoogleFonts.poppins(color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -388,7 +914,7 @@ class _EnrollmentFormScreenState extends State<EnrollmentFormScreen> {
                     firstDate: DateTime(1900),
                     lastDate: DateTime.now(),
                   );
-                  if (pickedDate != null) {
+                  if (pickedDate != null && mounted) {
                     setState(() {
                       _selectedDate = pickedDate;
                     });
@@ -531,24 +1057,71 @@ class _EnrollmentFormScreenState extends State<EnrollmentFormScreen> {
                 },
               ).animate().fadeIn(duration: 850.ms).slideY(begin: 0.1, end: 0),
               const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: () {
-                  if (_formKey.currentState!.validate() &&
-                      _selectedDate != null) {
-                    _showPreviewDialog();
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF3B82F6),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _showSearchDialog,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF3B82F6),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        'Search',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
                   ),
-                  minimumSize: const Size(double.infinity, 50),
-                ),
-                child: Text(
-                  'Enroll',
-                  style: GoogleFonts.poppins(color: Colors.white, fontSize: 18),
-                ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _resetForm,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.grey,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        'Reset',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        if (_formKey.currentState!.validate() &&
+                            _selectedDate != null) {
+                          _showPreviewDialog();
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF3B82F6),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        'Enroll',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ).animate().fadeIn(duration: 900.ms).scale(),
             ],
           ),

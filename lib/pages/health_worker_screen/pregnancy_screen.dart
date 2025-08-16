@@ -1,10 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:maternal_app/models/pregnancy.dart';
+import 'package:maternal_app/services/pregnacy_service.dart';
 import 'package:intl/intl.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:maternal_app/pages/health_worker_screen/dashboard_screen.dart';
+import 'package:maternal_app/widgets/healthworkerBottom.dart';
+import 'package:maternal_app/pages/health_worker_screen/infantEnrollment.dart';
+import 'package:maternal_app/pages/health_worker_screen/antenatal_screen.dart';
+import 'package:maternal_app/pages/health_worker_screen/infantVisit_screen.dart';
 
 class PregnancyFormScreen extends StatefulWidget {
-  const PregnancyFormScreen({super.key});
+  final String patientId; // Patient ID received here (used as foreign key)
+  const PregnancyFormScreen({super.key, required this.patientId});
 
   @override
   State<PregnancyFormScreen> createState() => _PregnancyFormScreenState();
@@ -16,17 +24,121 @@ class _PregnancyFormScreenState extends State<PregnancyFormScreen> {
   DateTime? _dueDate;
   int _gestationWeeks = 0;
 
+  int _selectedIndex = 1;
+
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
+    if (index == 0) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => HealthWorkScreen()),
+      );
+    } else if (index == 1) {
+      // Already on Enrollment
+    } else if (index == 2) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => InfantEnrollmentForm()),
+      );
+    } else if (index == 3) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => InfantVitalsForm()),
+      );
+    } else if (index == 4) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => AntenatalVisitForm()),
+      );
+    }
+  }
+
   void _calculateDueDateAndGestation() {
     if (_lmpDate != null) {
       setState(() {
         // Calculate due date: LMP + 280 days
         _dueDate = _lmpDate!.add(const Duration(days: 280));
-
         // Calculate gestation weeks: (Current date - LMP) in weeks
         final now = DateTime.now();
         final difference = now.difference(_lmpDate!);
         _gestationWeeks = (difference.inDays / 7).floor();
       });
+    }
+  }
+
+  Future<void> _submitPregnancyDetails() async {
+    if (_formKey.currentState!.validate() && _lmpDate != null) {
+      // Show loader
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return const Center(child: CircularProgressIndicator());
+        },
+      );
+      // Create Pregnancy object with patientId as foreign key
+      Pregnancy newPregnancy = Pregnancy(
+        patientId: widget.patientId,
+        lastmenstructionperiod: DateFormat('yyyy-MM-dd').format(_lmpDate!),
+        gestationWeeks: _gestationWeeks,
+        dueDate: _dueDate != null
+            ? DateFormat('yyyy-MM-dd').format(_dueDate!)
+            : null,
+        pregnancyStatus:
+            'Active', // Assuming a default status; adjust as needed
+      );
+      try {
+        await PregnancyService().createPregnancy(newPregnancy);
+        if (!mounted) return;
+        // Close loader
+        Navigator.of(context).pop();
+        // Show success dialog (centered card)
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.green, size: 60),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Pregnancy Submitted',
+                    style: GoogleFonts.poppins(fontSize: 18),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+        // Automatically close dialog after 2 seconds and navigate to home screen
+        await Future.delayed(const Duration(seconds: 2));
+        if (!mounted) return;
+        Navigator.of(context).pop(); // Close success dialog
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => HealthWorkScreen(),
+          ), // Adjust to your home screen
+        );
+      } catch (e) {
+        if (!mounted) return;
+        // Close loader
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error submitting pregnancy details: $e')),
+        );
+      }
+    } else {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please select LMP date')));
     }
   }
 
@@ -127,16 +239,7 @@ class _PregnancyFormScreenState extends State<PregnancyFormScreen> {
               ).animate().fadeIn(duration: 700.ms).slideY(begin: 0.1, end: 0),
               const SizedBox(height: 24),
               ElevatedButton(
-                onPressed: () {
-                  if (_formKey.currentState!.validate() && _lmpDate != null) {
-                    // Submit pregnancy details logic (e.g., API call)
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Pregnancy Details Submitted!'),
-                      ),
-                    );
-                  }
-                },
+                onPressed: _submitPregnancyDetails,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF3B82F6),
                   shape: RoundedRectangleBorder(
@@ -152,6 +255,11 @@ class _PregnancyFormScreenState extends State<PregnancyFormScreen> {
             ],
           ),
         ),
+      ),
+      bottomNavigationBar: buildHealthWorkerBottomNavigationBar(
+        context,
+        _selectedIndex,
+        _onItemTapped,
       ),
     );
   }
